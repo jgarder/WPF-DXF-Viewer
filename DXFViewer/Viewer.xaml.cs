@@ -1,4 +1,4 @@
-﻿using DXFLib;
+using DXFLib;
 using System;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
@@ -42,6 +42,14 @@ namespace DXFViewer
         // Set when ZoomExtents is requested before the canvas has a viewport size;
         // the pending fit is applied on the next layout pass.
         private bool zoomExtentsPending;
+
+        // The most recent conversion, so the load result can be inspected or reported.
+        private DxfLoadResult loadResult;
+
+        // Paths drawn with a dash pattern. WPF sizes dashes in units of the stroke
+        // thickness, so their patterns have to be rescaled whenever the view zooms.
+        private readonly System.Collections.Generic.List<DashPatternPath> dashedPaths =
+            new System.Collections.Generic.List<DashPatternPath>();
 
         #endregion Fields
 
@@ -102,13 +110,18 @@ namespace DXFViewer
         {
             var instance = (d as Viewer);
             instance.LoadBackgroundGeometries();
-            //instance.LoadBackground();
         }
 
-        private void LoadBackground()
+        /// <summary>
+        /// Loads and displays a DXF file.
+        /// </summary>
+        private void LoadBackgroundGeometries()
         {
             canvas.Children.Clear();
-            var dxf = this.ConvertDxf(FileName);
+            dashedPaths.Clear();
+            loadResult = null;
+
+            var dxf = this.ConvertDxfToGeometries(FileName);
             if (dxf.Document != null && dxf.Canvas != null)
             {
                 drawingExtendsUpperRight = dxf.Document.Header.DrawingExtendsUpperRight;
@@ -118,16 +131,35 @@ namespace DXFViewer
             }
         }
 
-        private void LoadBackgroundGeometries()
+        /// <summary>
+        /// The conversion of the file on screen, including any entity types that could
+        /// not be drawn.
+        /// </summary>
+        public DxfLoadResult LoadResult => loadResult;
+
+        /// <summary>
+        /// Rescales the dash patterns of the dashed paths to the current stroke thickness.
+        /// WPF measures a dash pattern in multiples of the stroke thickness, so the pattern
+        /// has to be divided by it to keep the dashes a constant length on screen.
+        /// </summary>
+        private void RefreshDashPatterns()
         {
-            canvas.Children.Clear();
-            var dxf = this.ConvertDxfToGeometries(FileName);
-            if (dxf.Document != null && dxf.Canvas != null)
+            if (dashedPaths.Count == 0) return;
+
+            double thickness = StrokeThickness;
+            if (!(thickness > 0) || double.IsInfinity(thickness)) return;
+
+            foreach (DashPatternPath dashed in dashedPaths)
             {
-                drawingExtendsUpperRight = dxf.Document.Header.DrawingExtendsUpperRight;
-                drawingExtendsLowerRight = dxf.Document.Header.DrawingExtendsLowerRight;
-                canvas.Children.Add(dxf.Canvas);
-                ZoomExtentsWhenReady();
+                DoubleCollection scaled = new DoubleCollection();
+
+                foreach (double length in dashed.DrawingUnits)
+                {
+                    // Keep every element representable; WPF rejects zero-length dashes.
+                    scaled.Add(Math.Max(length / thickness, 1e-6));
+                }
+
+                dashed.Path.StrokeDashArray = scaled;
             }
         }
 
@@ -152,44 +184,58 @@ namespace DXFViewer
 
         private (DXFDocument Document, Canvas Canvas) ConvertDxfToGeometries(string fileName)
         {
+            DxfLoadResult result = DxfConversionHelpers.LoadDxf(fileName);
+
+            if (result?.Drawing?.Items == null || result.Drawing.Items.Count == 0) return (null, null);
+
             Canvas childCanvas = new Canvas();
-            var (Document, Path) = DxfConversionHelpers.LoadDxfGeometries(fileName);
 
-            if (Path == null) return (null, null);
-
-            Binding bindingStrokeThickness = new Binding(nameof(StrokeThickness)) { Source = this, Mode = BindingMode.OneWay, ValidatesOnDataErrors = false, ValidatesOnExceptions = false, ValidatesOnNotifyDataErrors = false };
-            Path.DataContext = this;
-            Path.SetBinding(Shape.StrokeThicknessProperty, bindingStrokeThickness);
-
-            childCanvas.Children.Add(Path);
-            childCanvas.RenderTransform = new ScaleTransform(ScaleX, ScaleY);
-            childCanvas.RenderTransformOrigin = new Point(0.5, 0.5);
-
-            return (Document, childCanvas);
-        }
-
-
-        private (DXFDocument Document, Canvas Canvas) ConvertDxf(string fileName)
-        {
-            Canvas childCanvas = new Canvas();
-            var (Document, Shapes) = DxfConversionHelpers.LoadDxf(fileName);
-
-            // Add it to canvas                    
-            foreach (Shape shape in Shapes)
+            Binding bindingStrokeThickness = new Binding(nameof(StrokeThickness))
             {
-                //shape.StrokeThickness = strokeThickness;
+                Source = this,
+                Mode = BindingMode.OneWay,
+                ValidatesOnDataErrors = false,
+                ValidatesOnExceptions = false,
+                ValidatesOnNotifyDataErrors = false
+            };
 
-                Binding bindingStrokeThickness = new Binding(nameof(StrokeThickness)) { Source = this, Mode = BindingMode.OneWay, ValidatesOnDataErrors = false, ValidatesOnExceptions = false, ValidatesOnNotifyDataErrors = false };
-                shape.DataContext = this;
-                shape.SetBinding(Shape.StrokeThicknessProperty, bindingStrokeThickness);
+            foreach (PositionedGeometry item in result.Drawing.Items)
+            {
+                System.Windows.Shapes.Path path = new System.Windows.Shapes.Path
+                {
+                    Data = item.Geometry,
+                    Stroke = item.Stroke,
+                    StrokeLineJoin = PenLineJoin.Round,
+                    StrokeStartLineCap = PenLineCap.Round,
+                    StrokeEndLineCap = PenLineCap.Round
+                };
 
-                childCanvas.Children.Add(shape);
+                if (item.IsFilled)
+                {
+                    path.Fill = item.Fill ?? item.Stroke;
+                }
+
+                if (item.Dashes != null && item.Dashes.Length >= 2)
+                {
+                    // WPF expresses dashes as multiples of the stroke thickness, while the
+                    // DXF pattern is in drawing units; RefreshDashPatterns converts one to
+                    // the other and is re-run whenever the view zooms.
+                    path.StrokeDashCap = PenLineCap.Flat;
+                    dashedPaths.Add(new DashPatternPath(path, item.Dashes));
+                }
+
+                path.DataContext = this;
+                path.SetBinding(System.Windows.Shapes.Shape.StrokeThicknessProperty, bindingStrokeThickness);
+
+                childCanvas.Children.Add(path);
             }
 
             childCanvas.RenderTransform = new ScaleTransform(ScaleX, ScaleY);
             childCanvas.RenderTransformOrigin = new Point(0.5, 0.5);
 
-            return (Document, childCanvas);
+            loadResult = result;
+
+            return (result.Document, childCanvas);
         }
 
         #endregion Methods
@@ -251,6 +297,7 @@ namespace DXFViewer
             NotifyPropertyChanged(nameof(Offset));
 
             StrokeThickness = 1 / canvas.Scale;
+            RefreshDashPatterns();
 
             zoomExtentsPending = false;
         }
@@ -368,6 +415,7 @@ namespace DXFViewer
             NotifyPropertyChanged(nameof(Offset));
 
             StrokeThickness = 1 / canvas.Scale;
+            RefreshDashPatterns();
         }
 
         public void ZoomOut()
@@ -380,6 +428,7 @@ namespace DXFViewer
             NotifyPropertyChanged(nameof(Offset));
 
             StrokeThickness = 1 / canvas.Scale;
+            RefreshDashPatterns();
         }
 
         protected override void OnMouseMove(MouseEventArgs e)
@@ -411,6 +460,7 @@ namespace DXFViewer
             NotifyPropertyChanged(nameof(Offset));
 
             StrokeThickness = 1 / canvas.Scale;
+            RefreshDashPatterns();
         }
 
         protected override void OnRenderSizeChanged(SizeChangedInfo sizeInfo)

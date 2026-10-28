@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 
 namespace DXFLib
 {
@@ -65,11 +65,6 @@ namespace DXFLib
     {
     }
 
-    [Entity("HATCH")]
-    public class DXFHatch : DXFGenericEntity
-    {
-    }
-
     [Entity("IMAGE")]
     public class DXFImage : DXFGenericEntity
     {
@@ -82,6 +77,17 @@ namespace DXFLib
 
     [Entity("MLINE")]
     public class DXFMLine : DXFGenericEntity
+    {
+    }
+
+    /// <summary>
+    /// A multileader. It carries its own leader geometry plus a block reference for the
+    /// text, and its group codes change by version, so it is kept as a generic entity.
+    /// Registering it matters: without an entity mapping the parser silently drops it,
+    /// so a renderer has nothing to report and the entity vanishes without a trace.
+    /// </summary>
+    [Entity("MLEADER")]
+    public class DXFMLeader : DXFGenericEntity
     {
     }
 

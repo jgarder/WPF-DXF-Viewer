@@ -1,7 +1,11 @@
-﻿namespace DXFLib
+namespace DXFLib
 {
+    /// <summary>
+    /// SHAPE as stored in DXF. The glyph itself lives in an external shape (SHX) file, which
+    /// this library does not read, so consumers can only place a marker at the insertion point.
+    /// </summary>
     [Entity("SHAPE")]
-    class DXFShape : DXFEntity
+    public class DXFShape : DXFEntity
     {
         public double Thickness { get; set; }
 

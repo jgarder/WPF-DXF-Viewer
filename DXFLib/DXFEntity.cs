@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 
 namespace DXFLib
 {
@@ -18,11 +18,40 @@ namespace DXFLib
 
         public string LineType { get; set; }
 
-        public int ColorNumber { get; set; }
+        /// <summary>
+        /// AutoCAD Color Index: 0 = ByBlock, 256 (or absent) = ByLayer, otherwise a
+        /// concrete palette index. Use <see cref="EffectiveColorNumber"/> to tell an
+        /// absent group code 62 (ByLayer) apart from an explicit 0 (ByBlock).
+        /// </summary>
+        public int ColorNumber { get; set; } = 256;
 
-        public double LineTypeScale { get; set; }
+        /// <summary>
+        /// True when the entity carried an explicit group code 62. When false the entity
+        /// colour is ByLayer, which is what DXF specifies for an absent 62.
+        /// </summary>
+        public bool ColorNumberWasSpecified { get; set; }
+
+        /// <summary>
+        /// The colour AutoCAD would use: the explicit index when one was written, and
+        /// ByLayer (256) when group code 62 was absent.
+        /// </summary>
+        public int EffectiveColorNumber => ColorNumberWasSpecified ? ColorNumber : 256;
+
+        /// <summary>
+        /// True-colour value from group codes 420 (24-bit) or 430 (name), when present.
+        /// A value here overrides <see cref="ColorNumber"/>.
+        /// </summary>
+        public int? TrueColor { get; set; }
+
+        /// <summary>True when the entity carried an explicit group code 48.</summary>
+        public bool LineTypeScaleWasSpecified { get; set; }
+
+        public double LineTypeScale { get; set; } = 1.0;
 
         public bool IsInvisible { get; set; }
+
+        /// <summary>Lineweight in hundredths of a millimetre (group code 370).</summary>
+        public int? LineWeight { get; set; }
 
         public virtual bool HasChildren { get { return (children != null && children.Count > 0); } }
 
@@ -54,12 +83,20 @@ namespace DXFLib
                     break;
                 case 62:
                     ColorNumber = int.Parse(value);
+                    ColorNumberWasSpecified = true;
+                    break;
+                case 420:
+                    TrueColor = int.Parse(value);
                     break;
                 case 48:
                     LineTypeScale = double.Parse(value);
+                    LineTypeScaleWasSpecified = true;
                     break;
                 case 60:
                     IsInvisible = int.Parse(value) == 1;
+                    break;
+                case 370:
+                    LineWeight = int.Parse(value);
                     break;
             }
         }

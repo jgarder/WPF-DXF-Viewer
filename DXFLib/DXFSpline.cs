@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 
 namespace DXFLib
@@ -7,6 +7,8 @@ namespace DXFLib
     public class DXFSpline : DXFEntity
     {
         private DXFPoint normal = new DXFPoint();
+
+        private readonly List<double> weightvalues = new List<double>();
 
         public DXFPoint Normal { get { return normal; } }
 
@@ -49,6 +51,13 @@ namespace DXFLib
         public List<double> KnotValues { get { return knotvalues; } }
 
         public double Weight { get; set; }
+
+        /// <summary>
+        /// Per control point weights (gc 41). A rational spline (flag 4) carries one weight
+        /// per control point, so they must be collected in order; a single scalar keeps only
+        /// the last one and silently renders the wrong curve.
+        /// </summary>
+        public List<double> WeightValues { get { return weightvalues; } }
 
         private List<DXFPoint> controlpoints = new List<DXFPoint>();
 
@@ -145,6 +154,7 @@ namespace DXFLib
                     break;
                 case 41:
                     Weight = double.Parse(value);
+                    weightvalues.Add(Weight);
                     break;
                 case 10:
                     if (LastControlPoint == null || LastControlPoint.X != null)
